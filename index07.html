@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>同人即売会 販売管理</title>
+
+<!-- Firebase CDN v8 -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<style>
+  body{
+    background:#111;
+    color:#fff;
+    font-family:sans-serif;
+    margin:0;
+    padding:10px;
+  }
+  h1,h2{
+    margin:10px 0;
+  }
+  .config-box{
+    background:#222;
+    padding:10px;
+    margin-bottom:15px;
+    border-radius:8px;
+  }
+  textarea{
+    width:100%;
+    height:140px;
+  }
+  button{
+    padding:12px 18px;
+    font-size:18px;
+    border-radius:8px;
+    border:none;
+    margin:4px 2px;
+    cursor:pointer;
+  }
+  .big-btn{
+    font-size:24px;
+    padding:20px;
+  }
+  .card{
+    background:#222;
+    margin-bottom:12px;
+    padding:12px;
+    border-radius:10px;
+  }
+  input{
+    width:100%;
+    font-size:16px;
+    padding:5px;
+    margin:4px 0;
+  }
+  .row{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+  .num{
+    font-size:24px;
+    font-weight:bold;
+  }
+</style>
+</head>
+<body>
+
+<h1>同人即売会 販売管理</h1>
+
+<div class="config-box">
+  <h2>Firebase設定</h2>
+  <p>Firebase の設定 JSON（{} 含めて貼る）</p>
+  <textarea id="firebaseConfigArea"></textarea>
+  <button onclick="connectFirebase()">Firebase に接続</button>
+  <p id="connectStatus"></p>
+</div>
+
+<h2>商品一覧</h2>
+<div id="items"></div>
+
+<h2>商品追加</h2>
+<div class="card">
+  <input id="newName" placeholder="商品名">
+  <input id="newPrice" type="number" placeholder="値段（数字）">
+  <input id="newStock" type="number" placeholder="初期在庫">
+  <button onclick="addItem()">追加</button>
+</div>
+
+<h2>売上合計</h2>
+<div id="summary"></div>
+
+<script>
+/* =========================================================
+   アプリ状態
+========================================================= */
+let db = null;
+let firebaseConnected = false;
+
+// 商品データ
+let items = []; 
+// localStorage 保存キー
+const LOCAL_KEY = "doujin-items";
+
+/* =========================================================
+   データ保存（Firebase or Local）
+========================================================= */
+function saveData(){
+  if(firebaseConnected && db){
+    db.set(items);
+  }else{
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(items));
+  }
+}
+
+function loadLocal(){
+  const d = localStorage.getItem(LOCAL_KEY);
+  if(d) items = JSON.parse(d);
+}
+
+/* =========================================================
+   Firebase接続
+========================================================= */
+function connectFirebase(){
+  const txt = document.getElementById("firebaseConfigArea").value.trim();
+  try{
+    const cfg = JSON.parse(txt);
+    const app = firebase.initializeApp(cfg);
+    db = firebase.database().ref("items");
+    firebaseConnected = true;
+    document.getElementById("connectStatus").textContent =
+      "Firebase 接続成功（リアルタイム同期中）";
+
+    // 変更をリアルタイム反映
+    db.on("value", snap=>{
+      const v = snap.val();
+      if(v){
+        items = v;
+        render();
+      }
+    });
+
+    saveData();
+  }catch(e){
+    firebaseConnected = false;
+    document.getElementById("connectStatus").textContent =
+      "Firebase 接続失敗：設定を確認してください";
+    console.error(e);
+  }
+}
+/* =========================================================
+   商品追加
+========================================================= */
+function addItem(){
+  const name  = document.getElementById("newName").value.trim();
+  const price = Number(document.getElementById("newPrice").value);
+  const stock = Number(document.getElementById("newStock").value);
+
+  if(!name || isNaN(price) || isNaN(stock)){
+    alert("正しい値を入力してください");
+    return;
+  }
+
+  items.push({
+    name,
+    price,
+    stock,
+    sold:0
+  });
+
+  saveData();
+  render();
+
+  document.getElementById("newName").value = "";
+  document.getElementById("newPrice").value = "";
+  document.getElementById("newStock").value = "";
+}
+
+/* =========================================================
+   在庫＋、在庫−、売上＋、売上−
+========================================================= */
+function changeStock(i, diff){
+  items[i].stock += diff;
+  if(items[i].stock < 0) items[i].stock = 0;
+  saveData();
+  render();
+}
+
+function changeSold(i, diff){
+  items[i].sold += diff;
+  if(items[i].sold < 0) items[i].sold = 0;
+  saveData();
+  render();
+}
+
+/* =========================================================
+   レンダリング
+========================================================= */
+function render(){
+  const box = document.getElementById("items");
+  box.innerHTML = "";
+
+  items.forEach((it, i)=>{
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="row">
+        <div style="flex:1">
+          <div><strong>${it.name}</strong></div>
+          <div>値段：${it.price} 円</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:4px;">
+        <div>在庫：</div>
+        <div class="num">${it.stock}</div>
+        <button onclick="changeStock(${i},1)">＋</button>
+        <button onclick="changeStock(${i},-1)">−</button>
+      </div>
+
+      <div class="row" style="margin-top:4px;">
+        <div>売数：</div>
+        <div class="num">${it.sold}</div>
+        <button onclick="changeSold(${i},1)">＋</button>
+        <button onclick="changeSold(${i},-1)">−</button>
+      </div>
+    `;
+    box.appendChild(card);
+  });
+
+  updateSummary();
+}
+
+/* =========================================================
+   合計集計
+========================================================= */
+function updateSummary(){
+  const total = items.reduce((a,b)=>a + b.sold * b.price, 0);
+  document.getElementById("summary").textContent =
+    `合計： ${total} 円`;
+}
+
+/* =========================================================
+   起動時処理
+========================================================= */
+loadLocal();
+render();
+</script>
+
+</body>
+</html>
